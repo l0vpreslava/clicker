@@ -19,49 +19,82 @@ import (
     "math/rand/v2"
 )
 
-func main() {
-    const screenWidth = 800
-    const screenHeight = 600
+type Game struct {
+    ballPosition  rl.Vector2
+    ballColor     rl.Color
+    targets       []rl.Vector2
+    targetRadius  float32
+    spawnInterval float32
+    lastSpawnTime float32
+}
 
-    rl.InitWindow(screenWidth, screenHeight, "Click me!")
+func NewGame() Game {
+    return Game{
+        ballPosition:  rl.NewVector2(100, 100),
+        ballColor:     rl.GetColor(0xf96e61ff),
+        targets:       make([]rl.Vector2, 0),
+        targetRadius:  30.0,
+        spawnInterval: 1.5,
+        lastSpawnTime: 0,
+    }
+}
+
+const ScreenWidth = 800.0
+const ScreenHeight = 600.0
+
+func main() {
+
+    rl.InitWindow(ScreenWidth, ScreenHeight, "Click me!")
     defer rl.CloseWindow()
 
     rl.SetTargetFPS(60)
-    ballPosition := rl.NewVector2(100, 100)
-    ballColor := rl.GetColor(0xf96e61ff)
-
-    targets := []rl.Vector2{}
-    targetRadius := 30
+    game := NewGame()
 
     var timer float32
-    spawnInterval := float32(1.5)
-    lastSpawnTime := float32(0)
 
     for !rl.WindowShouldClose() {
-        timer += rl.GetFrameTime()
+        dt := rl.GetFrameTime()
+        timer += dt
 
-        if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-            ballPosition = rl.GetMousePosition()
-        }
+        game.ballPosition = rl.GetMousePosition()
 
-        if timer-lastSpawnTime >= spawnInterval {
-            x := float32((rand.IntN(screenWidth-2*targetRadius)) + targetRadius)
-            y := float32((rand.IntN(screenHeight-2*targetRadius)) + targetRadius)
-            targets = append(targets, rl.NewVector2(x, y))
-            lastSpawnTime = timer
+        if timer-game.lastSpawnTime >= game.spawnInterval {
+            x := rand.Float32() * (ScreenWidth - 2.0*game.targetRadius) + game.targetRadius
+            y := rand.Float32() * (ScreenHeight - 2.0*game.targetRadius) + game.targetRadius
+            game.targets = append(game.targets, rl.NewVector2(x, y))
+            game.lastSpawnTime = timer
 
-            if spawnInterval > 0.2 {
-                spawnInterval -= 0.0001
+            if game.spawnInterval > 0.2 {
+                game.spawnInterval -= 0.1 * dt
             }
         }
+
+
+        if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+            targets := make([]rl.Vector2, len(game.targets))
+            index := 0
+            for _, target := range game.targets {
+                if !rl.CheckCollisionPointCircle(rl.GetMousePosition(),target, game.targetRadius-10){
+                    targets[index] = target
+                    index++
+                }
+            }
+            game.targets = targets[:index]
+        }
+
         rl.BeginDrawing()
 
         rl.ClearBackground(rl.GetColor(0xf9d8c2FF))
-        rl.DrawCircleV(ballPosition, 40, ballColor)
+        rl.DrawCircleV(game.ballPosition, 40, game.ballColor)
 
-        for _, target := range targets {
-            rl.DrawCircleV(target, float32(targetRadius-10), rl.GetColor(0x9f80fcff))
+        for _, target := range game.targets {
+            rl.DrawCircleV(target, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
         }
         rl.EndDrawing()
     }
 }
+
+
+
+
+
