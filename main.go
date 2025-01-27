@@ -1,4 +1,3 @@
-//TODO: Добавить условие проигрыша, когда мишеней станет слишком много
 //TODO: Добавить меню, в котором будет кнопка играть, настройки и выход
 //TODO: Нарисовать фоны, мишени, курсор, эффект курсора при нажатии
 //TODO: Интегрировать нарисованные ресурсы в игру
@@ -21,11 +20,13 @@ type Game struct {
 	ballColor      rl.Color
 	targets        []rl.Vector2
 	targetRadius   float32
+	timer          float32
 	spawnInterval  float32
 	lastSpawnTime  float32
 	removedTargets []RemovedTarget
 	score          int
 	font           rl.Font
+	currentState   int
 }
 
 func NewGame() Game {
@@ -34,11 +35,13 @@ func NewGame() Game {
 		ballColor:      rl.GetColor(0xf96e61ff),
 		targets:        make([]rl.Vector2, 0),
 		targetRadius:   30.0,
+		timer:          0,
 		spawnInterval:  1.5,
 		lastSpawnTime:  0,
 		removedTargets: make([]RemovedTarget, 0),
 		score:          0,
 		font:           rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
+		currentState:   InGame,
 	}
 }
 
@@ -58,30 +61,38 @@ func ShowDeleteAnimation(target RemovedTarget, dt float32) rl.Vector2 {
 	return target.position
 }
 
-const ScreenWidth = 800.0
-const ScreenHeight = 600.0
+func UpdateAnimation(game *Game, dt float32) {
+	for i := range game.removedTargets {
+		game.removedTargets[i].position = ShowDeleteAnimation(game.removedTargets[i], dt)
+	}
 
-func main() {
+	newRemovedTargets := make([]RemovedTarget, 0)
+	for _, removedTarget := range game.removedTargets {
+		if removedTarget.position.Y < ScreenHeight {
+			newRemovedTargets = append(newRemovedTargets, removedTarget)
+		}
+	}
+	game.removedTargets = newRemovedTargets
+}
 
-	rl.InitWindow(ScreenWidth, ScreenHeight, "Click me!")
-	defer rl.CloseWindow()
+func Update(game *Game) {
+	dt := rl.GetFrameTime()
+	game.timer += dt
 
-	rl.SetTargetFPS(60)
-	game := NewGame()
+	game.ballPosition = rl.GetMousePosition()
 
-	var timer float32
+	switch game.currentState {
+	case Menu:
+	case InGame:
+		if rl.IsKeyDown(rl.KeyEscape) {
+			game.currentState = Pause
+		}
 
-	for !rl.WindowShouldClose() {
-		dt := rl.GetFrameTime()
-		timer += dt
-
-		game.ballPosition = rl.GetMousePosition()
-
-		if timer-game.lastSpawnTime >= game.spawnInterval {
+		if game.timer-game.lastSpawnTime >= game.spawnInterval {
 			x := rand.Float32()*(ScreenWidth-2.0*game.targetRadius) + game.targetRadius
 			y := rand.Float32()*(ScreenHeight-2.0*game.targetRadius) + game.targetRadius
 			game.targets = append(game.targets, rl.NewVector2(x, y))
-			game.lastSpawnTime = timer
+			game.lastSpawnTime = game.timer
 
 			if game.spawnInterval > 0.2 {
 				game.spawnInterval -= 0.1 * dt
@@ -103,23 +114,61 @@ func main() {
 			game.targets = targets[:index]
 		}
 
-		for i := range game.removedTargets {
-			game.removedTargets[i].position = ShowDeleteAnimation(game.removedTargets[i], dt)
-		}
+		UpdateAnimation(game, dt)
 
-		newRemovedTargets := make([]RemovedTarget, 0)
-		for _, removedTarget := range game.removedTargets {
-			if removedTarget.position.Y < ScreenHeight {
-				newRemovedTargets = append(newRemovedTargets, removedTarget)
+		if len(game.targets) >= 15 {
+			for _, target := range game.targets {
+				game.removedTargets = append(game.removedTargets, RemovedTarget{position: target, timer: 0})
 			}
+			game.targets = make([]rl.Vector2, 0)
+			game.currentState = GameOver
 		}
-		game.removedTargets = newRemovedTargets
+	case Pause:
+		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+			game.currentState = InGame
+		}
+	case GameOver:
+		UpdateAnimation(game, dt)
+	}
+}
+
+func CenterText(text string, fontSize int32, screenWidth int32, screenHeight int32) rl.Vector2 {
+	textWidth := rl.MeasureText(text, fontSize)
+	textHeight := fontSize // Высота текста равна размеру шрифта
+
+	posX := float32((screenWidth - textWidth) / 2)
+	posY := float32((screenHeight - textHeight) / 2)
+
+	return rl.Vector2{X: posX, Y: posY}
+}
+
+const (
+	Menu = iota
+	InGame
+	Pause
+	GameOver
+)
+
+const ScreenWidth = 800.0
+const ScreenHeight = 600.0
+
+func main() {
+
+	rl.InitWindow(ScreenWidth, ScreenHeight, "Click me!")
+	defer rl.CloseWindow()
+
+	rl.SetTargetFPS(60)
+	rl.SetExitKey(rl.KeyF5)
+	game := NewGame()
+
+	for !rl.WindowShouldClose() {
+
+		Update(&game)
 
 		rl.BeginDrawing()
 
 		rl.ClearBackground(rl.GetColor(0xf9d8c2FF))
 		rl.DrawCircleV(game.ballPosition, 40, game.ballColor)
-
 		for _, target := range game.targets {
 			rl.DrawCircleV(target, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
 		}
@@ -128,9 +177,28 @@ func main() {
 			rl.DrawCircleV(removedTarget.position, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
 		}
 
-		text := fmt.Sprintf("Score: %d", game.score)
-		rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+		switch game.currentState {
+		case Menu:
 
+		case InGame:
+
+			text := fmt.Sprintf("Score: %d", game.score)
+			rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+
+		case Pause:
+			text := fmt.Sprintf("Score: %d", game.score)
+			rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+			text = "Pause"
+			pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+			rl.DrawTextEx(game.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
+
+		case GameOver:
+			text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
+			pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+
+			rl.DrawTextEx(game.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
+
+		}
 		rl.EndDrawing()
 	}
 }
