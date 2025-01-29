@@ -1,4 +1,3 @@
-//TODO: Добавить меню, в котором будет кнопка играть, настройки и выход
 //TODO: Нарисовать фоны, мишени, курсор, эффект курсора при нажатии
 //TODO: Интегрировать нарисованные ресурсы в игру
 //TODO: Начать сохранять рекорды по очкам в файл
@@ -11,9 +10,23 @@ package main
 
 import (
 	"fmt"
+	rg "github.com/gen2brain/raylib-go/raygui"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"math/rand/v2"
+	"strconv"
+	"strings"
 )
+
+const (
+	Menu = iota
+	InSettings
+	InGame
+	Pause
+	GameOver
+)
+
+const ScreenWidth = 800.0
+const ScreenHeight = 600.0
 
 type Game struct {
 	ballPosition   rl.Vector2
@@ -29,6 +42,13 @@ type Game struct {
 	currentState   int
 }
 
+type Settings struct {
+	screenResolution  []string
+	currentResolution string
+	fullscreen        bool
+	gameVolume        float32
+}
+
 func NewGame() Game {
 	return Game{
 		ballPosition:   rl.NewVector2(100, 100),
@@ -41,7 +61,16 @@ func NewGame() Game {
 		removedTargets: make([]RemovedTarget, 0),
 		score:          0,
 		font:           rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
-		currentState:   InGame,
+		currentState:   Menu,
+	}
+}
+
+func NewSettigs() Settings {
+	return Settings{
+		screenResolution:  []string{"800x600", "1200x800", "1440x900"},
+		currentResolution: "800x600",
+		fullscreen:        false,
+		gameVolume:        0.50,
 	}
 }
 
@@ -68,14 +97,36 @@ func UpdateAnimation(game *Game, dt float32) {
 
 	newRemovedTargets := make([]RemovedTarget, 0)
 	for _, removedTarget := range game.removedTargets {
-		if removedTarget.position.Y < ScreenHeight {
+		if removedTarget.position.Y < float32(rl.GetScreenHeight()) {
 			newRemovedTargets = append(newRemovedTargets, removedTarget)
 		}
 	}
 	game.removedTargets = newRemovedTargets
 }
 
-func Update(game *Game) {
+func SetWindowSize(resolution string) {
+	parts := strings.Split(resolution, "x")
+	if len(parts) != 2 {
+		fmt.Println("Invalid resolution format.")
+		return
+	}
+
+	width, err := strconv.Atoi(parts[0])
+	if err != nil {
+		fmt.Println("Error converting width:", err)
+		return
+	}
+
+	height, err := strconv.Atoi(parts[1])
+	if err != nil {
+		fmt.Println("Error converting height:", err)
+		return
+	}
+
+	rl.SetWindowSize(width, height)
+}
+
+func Update(game *Game, settings *Settings) {
 	dt := rl.GetFrameTime()
 	game.timer += dt
 
@@ -83,6 +134,51 @@ func Update(game *Game) {
 
 	switch game.currentState {
 	case Menu:
+		if rg.Button(rl.Rectangle{X: 50, Y: 150, Width: 100, Height: 50}, "START") {
+			game.currentState = InGame
+		}
+
+		if rg.Button(rl.Rectangle{X: 50, Y: 250, Width: 100, Height: 50}, "Settings") {
+			game.currentState = InSettings
+		}
+
+		if rg.Button(rl.Rectangle{X: 50, Y: 350, Width: 100, Height: 50}, "Quit") {
+			rl.CloseWindow()
+		}
+	case InSettings:
+		if rl.IsKeyPressed(rl.KeyEscape) || rg.Button(rl.Rectangle{X: 10, Y: 10, Width: 20, Height: 20}, "#114#") {
+			game.currentState = Menu
+		}
+
+		text := ""
+		if settings.fullscreen {
+			text = "Fullscreen"
+		} else {
+			text = "Window"
+		}
+
+		if rg.Button(rl.Rectangle{X: 300, Y: 50, Width: 200, Height: 50}, text) {
+			settings.fullscreen = !settings.fullscreen
+			rl.ToggleFullscreen()
+		}
+
+		if rg.Button(rl.Rectangle{X: 300, Y: 150, Width: 200, Height: 50}, settings.currentResolution) {
+			screenResLen := len(settings.screenResolution)
+
+			for i, resolution := range settings.screenResolution {
+				if resolution == settings.currentResolution && (i+1) != screenResLen {
+					settings.currentResolution = settings.screenResolution[i+1]
+					SetWindowSize(settings.currentResolution)
+					break
+				} else if i == screenResLen-1 {
+					settings.currentResolution = settings.screenResolution[0]
+					SetWindowSize(settings.currentResolution)
+				}
+			}
+		}
+
+		settings.gameVolume = rg.SliderBar(rl.Rectangle{X: 300, Y: 250, Width: 200, Height: 50}, "Volume", "", settings.gameVolume, 0, 1)
+
 	case InGame:
 		if rl.IsKeyDown(rl.KeyEscape) {
 			game.currentState = Pause
@@ -94,7 +190,7 @@ func Update(game *Game) {
 			game.targets = append(game.targets, rl.NewVector2(x, y))
 			game.lastSpawnTime = game.timer
 
-			if game.spawnInterval > 0.2 {
+			if game.spawnInterval > 0.5 {
 				game.spawnInterval -= 0.1 * dt
 			}
 		}
@@ -130,27 +226,53 @@ func Update(game *Game) {
 	case GameOver:
 		UpdateAnimation(game, dt)
 	}
+
+	rl.BeginDrawing()
+
+	rl.ClearBackground(rl.GetColor(0xf9d8c2FF))
+	rl.DrawCircleV(game.ballPosition, 40, game.ballColor)
+	for _, target := range game.targets {
+		rl.DrawCircleV(target, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
+	}
+
+	for _, removedTarget := range game.removedTargets {
+		rl.DrawCircleV(removedTarget.position, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
+	}
+
+	switch game.currentState {
+	case Menu:
+
+	case InGame:
+
+		text := fmt.Sprintf("Score: %d", game.score)
+		rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+
+	case Pause:
+		text := fmt.Sprintf("Score: %d", game.score)
+		rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+		text = "Pause"
+		pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+		rl.DrawTextEx(game.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
+
+	case GameOver:
+		text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
+		pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+
+		rl.DrawTextEx(game.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
+
+	}
+	rl.EndDrawing()
 }
 
 func CenterText(text string, fontSize int32, screenWidth int32, screenHeight int32) rl.Vector2 {
 	textWidth := rl.MeasureText(text, fontSize)
-	textHeight := fontSize // Высота текста равна размеру шрифта
+	textHeight := fontSize
 
 	posX := float32((screenWidth - textWidth) / 2)
 	posY := float32((screenHeight - textHeight) / 2)
 
 	return rl.Vector2{X: posX, Y: posY}
 }
-
-const (
-	Menu = iota
-	InGame
-	Pause
-	GameOver
-)
-
-const ScreenWidth = 800.0
-const ScreenHeight = 600.0
 
 func main() {
 
@@ -159,46 +281,13 @@ func main() {
 
 	rl.SetTargetFPS(60)
 	rl.SetExitKey(rl.KeyF5)
+	rl.SetWindowState(rl.FlagWindowResizable)
+
 	game := NewGame()
+	settings := NewSettigs()
 
 	for !rl.WindowShouldClose() {
 
-		Update(&game)
-
-		rl.BeginDrawing()
-
-		rl.ClearBackground(rl.GetColor(0xf9d8c2FF))
-		rl.DrawCircleV(game.ballPosition, 40, game.ballColor)
-		for _, target := range game.targets {
-			rl.DrawCircleV(target, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
-		}
-
-		for _, removedTarget := range game.removedTargets {
-			rl.DrawCircleV(removedTarget.position, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
-		}
-
-		switch game.currentState {
-		case Menu:
-
-		case InGame:
-
-			text := fmt.Sprintf("Score: %d", game.score)
-			rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
-
-		case Pause:
-			text := fmt.Sprintf("Score: %d", game.score)
-			rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
-			text = "Pause"
-			pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-			rl.DrawTextEx(game.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
-
-		case GameOver:
-			text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
-			pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-
-			rl.DrawTextEx(game.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
-
-		}
-		rl.EndDrawing()
+		Update(&game, &settings)
 	}
 }
