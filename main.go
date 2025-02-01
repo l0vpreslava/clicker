@@ -1,7 +1,5 @@
 //TODO: Нарисовать фоны, мишени, курсор, эффект курсора при нажатии
 //TODO: Интегрировать нарисованные ресурсы в игру
-//TODO: Начать сохранять рекорды по очкам в файл
-//TODO: Добавить в меню таблицу рекордов
 //TODO: Добавить в игру звуковое сопровождение: эффекты нажатия кнопок в меню, эффект нажатия курсора в игре, эффект уничтожения мишени
 //TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
 //TODO: Выложить игру на itch.io
@@ -16,6 +14,7 @@ import (
     "os"
     "strconv"
     "strings"
+    "sort"
 )
 
 const (
@@ -39,6 +38,7 @@ type Game struct {
     lastSpawnTime  float32
     removedTargets []RemovedTarget
     score          int
+    scores []int
     font           rl.Font
     currentState   int
     isSaved        bool
@@ -62,6 +62,7 @@ func NewGame() Game {
         lastSpawnTime:  0,
         removedTargets: make([]RemovedTarget, 0),
         score:          0,
+        scores: make([]int, 0),
         font:           rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
         currentState:   Menu,
         isSaved:        false,
@@ -149,6 +150,47 @@ func SaveScore(score int, filename string) error {
     }
 
     return nil
+}
+
+func LoadScores(filename string) ([]int, error) {
+    data, err := os.ReadFile(filename)
+    if err != nil {
+        if os.IsNotExist(err) {
+            return []int{}, nil
+        }
+        return nil, err
+    }
+
+    lines := strings.Split(string(data), "\n")
+
+    scores := make([]int, 0)
+    for _, line := range lines {
+        if line == "" {
+            continue 
+        }
+        score, err := strconv.Atoi(line)
+        if err != nil {
+            return nil, err
+        }
+        scores = append(scores, score)
+    }
+
+    return scores, nil
+}
+
+func DrawHighScores(scores []int, font rl.Font, position rl.Vector2, fontSize float32, spacing float32, color rl.Color) {
+    y := position.Y
+
+    title := "High Scores:"
+    rl.DrawTextEx(font, title, rl.Vector2{X: position.X, Y: y}, fontSize, spacing, color)
+    y += fontSize + 10 
+    for i, score := range scores {
+        text := fmt.Sprintf("%d. %d", i+1, score)
+
+        rl.DrawTextEx(font, text, rl.Vector2{X: position.X, Y: y}, fontSize, spacing, color)
+
+        y += fontSize + 5
+    }
 }
 
 func Update(game *Game, settings *Settings) {
@@ -288,6 +330,8 @@ func Update(game *Game, settings *Settings) {
             }
             game.isSaved = true
         }
+        game.scores, _ = LoadScores("score.txt")
+        sort.Sort(sort.Reverse(sort.IntSlice(game.scores)))
 
         if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Retry") {
             game.score = 0
@@ -318,6 +362,7 @@ func Update(game *Game, settings *Settings) {
 
     switch game.currentState {
     case Menu:
+        DrawHighScores(game.scores, game.font, rl.NewVector2(300, 150), 30, 2, rl.GetColor(0x4d2f1fff))
 
     case InGame:
 
@@ -332,6 +377,7 @@ func Update(game *Game, settings *Settings) {
         rl.DrawTextEx(game.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
 
     case GameOver:
+        DrawHighScores(game.scores, game.font, rl.NewVector2(50, 150), 30, 2, rl.GetColor(0x4d2f1fff))
         text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
         pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
 
@@ -362,6 +408,8 @@ func main() {
 
     game := NewGame()
     settings := NewSettigs()
+    game.scores, _ = LoadScores("score.txt")
+    sort.Sort(sort.Reverse(sort.IntSlice(game.scores)))
 
     for !rl.WindowShouldClose() {
 
