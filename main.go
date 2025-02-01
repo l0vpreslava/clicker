@@ -13,6 +13,7 @@ import (
     rg "github.com/gen2brain/raylib-go/raygui"
     rl "github.com/gen2brain/raylib-go/raylib"
     "math/rand/v2"
+    "os"
     "strconv"
     "strings"
 )
@@ -40,6 +41,7 @@ type Game struct {
     score          int
     font           rl.Font
     currentState   int
+    isSaved        bool
 }
 
 type Settings struct {
@@ -62,6 +64,7 @@ func NewGame() Game {
         score:          0,
         font:           rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
         currentState:   Menu,
+        isSaved:        false,
     }
 }
 
@@ -129,6 +132,23 @@ func SetWindowSize(resolution string) {
     }
 
     rl.SetWindowSize(width, height)
+}
+
+func SaveScore(score int, filename string) error {
+    file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    scoreStr := fmt.Sprintf("%d\n", score)
+
+    _, err = file.WriteString(scoreStr)
+    if err != nil {
+        return err
+    }
+
+    return nil
 }
 
 func Update(game *Game, settings *Settings) {
@@ -253,13 +273,30 @@ func Update(game *Game, settings *Settings) {
             game.currentState = InGame
         }
         if rg.Button(rl.Rectangle{X: 150, Y: 350, Width: 100, Height: 50}, "Quit and save result") {
+            err := SaveScore(game.score, "score.txt")
+            if err != nil {
+                fmt.Println("Error saving score:", err)
+            }
             rl.CloseWindow()
         }
     case GameOver:
         UpdateAnimation(game, dt)
+        if !game.isSaved {
+            err := SaveScore(game.score, "score.txt")
+            if err != nil {
+                fmt.Println("Error saving score:", err)
+            }
+            game.isSaved = true
+        }
 
         if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Retry") {
-            rl.CloseWindow()
+            game.score = 0
+            game.targets = make([]Target, 0)
+            game.timer = 0
+            game.lastSpawnTime = 0
+            game.removedTargets = make([]RemovedTarget, 0)
+            game.isSaved = false
+            game.currentState = InGame
         }
 
         if rg.Button(rl.Rectangle{X: 400, Y: 350, Width: 100, Height: 50}, "Quit") {
