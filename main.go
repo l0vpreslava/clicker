@@ -1,7 +1,6 @@
-//TODO: Нарисовать фоны, мишени, курсор, эффект курсора при нажатии
-//TODO: Интегрировать нарисованные ресурсы в игру
+//TODO: Реализовать анимации
 //TODO: Добавить в игру звуковое сопровождение: эффекты нажатия кнопок в меню, эффект нажатия курсора в игре, эффект уничтожения мишени
-//TODO: Привести код в порядок, нормально расставать кнопочки
+//TODO: Привести код в порядок, нормально расставить кнопочки
 //TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
 //TODO: Выложить игру на itch.io
 
@@ -9,13 +8,14 @@ package main
 
 import (
     "fmt"
-    rg "github.com/gen2brain/raylib-go/raygui"
-    rl "github.com/gen2brain/raylib-go/raylib"
     "math/rand/v2"
     "os"
+    "sort"
     "strconv"
     "strings"
-    "sort"
+
+    rg "github.com/gen2brain/raylib-go/raygui"
+    rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 const (
@@ -28,21 +28,39 @@ const (
 
 const ScreenWidth = 800.0
 const ScreenHeight = 600.0
+const BannerTimeMax float32 = 0.5
+const TargetRadius float32 = 30
 
 type Game struct {
     ballPosition   rl.Vector2
     ballColor      rl.Color
     targets        []Target
-    targetRadius   float32
     timer          float32
     spawnInterval  float32
     lastSpawnTime  float32
     removedTargets []RemovedTarget
     score          int
-    scores []int
-    font           rl.Font
+    scores         []int
+    escapedBird    int
     currentState   int
-    isSaved        bool
+    settings       Settings
+    assets         Assets
+    showBanner     bool
+    bannerTimer    float32
+    shouldClose    bool
+    bannerAlpha    float32
+}
+
+type Assets struct {
+    font          rl.Font
+    bgMenu        rl.Texture2D
+    bgGame        rl.Texture2D
+    banner        rl.Texture2D
+    birdWingsUp   rl.Texture2D
+    birdWingsDown rl.Texture2D
+    birdDead      rl.Texture2D
+    sight         rl.Texture2D
+    dislike       rl.Texture2D
 }
 
 type Settings struct {
@@ -50,6 +68,7 @@ type Settings struct {
     currentResolution string
     fullscreen        bool
     gameVolume        float32
+    scale             float32
 }
 
 func NewGame() Game {
@@ -57,17 +76,24 @@ func NewGame() Game {
         ballPosition:   rl.NewVector2(100, 100),
         ballColor:      rl.GetColor(0xf96e61ff),
         targets:        make([]Target, 0),
-        targetRadius:   30.0,
         timer:          0,
         spawnInterval:  1.5,
         lastSpawnTime:  0,
         removedTargets: make([]RemovedTarget, 0),
         score:          0,
-        scores: make([]int, 0),
-        font:           rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
+        scores:         make([]int, 0),
         currentState:   Menu,
-        isSaved:        false,
+        settings:       NewSettigs(),
+        assets:         LoadAssets(),
+        showBanner:     false,
+        bannerTimer:    0,
+        shouldClose:    false,
+        bannerAlpha:    0,
     }
+}
+
+func (game *Game) Destroy() {
+    game.assets.Unload()
 }
 
 func NewSettigs() Settings {
@@ -76,17 +102,46 @@ func NewSettigs() Settings {
         currentResolution: "800x600",
         fullscreen:        false,
         gameVolume:        0.50,
+        scale:             1.5,
     }
 }
 
+func LoadAssets() Assets {
+    return Assets{
+        font:          rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
+        bgMenu:        rl.LoadTexture("assets/sprites/bg-menu.png"),
+        bgGame:        rl.LoadTexture("assets/sprites/bg-game.png"),
+        banner:        rl.LoadTexture("assets/sprites/bg-rep.png"),
+        dislike:       rl.LoadTexture("assets/sprites/hand.png"),
+        birdWingsUp:   rl.LoadTexture("assets/sprites/bird1.png"),
+        birdWingsDown: rl.LoadTexture("assets/sprites/bird2.png"),
+        birdDead:      rl.LoadTexture("assets/sprites/bird3.png"),
+        sight:         rl.LoadTexture("assets/sprites/sight.png"),
+    }
+}
+
+func (assets *Assets) Unload() {
+    rl.UnloadFont(assets.font)
+    rl.UnloadTexture(assets.bgMenu)
+    rl.UnloadTexture(assets.bgGame)
+    rl.UnloadTexture(assets.banner)
+    rl.UnloadTexture(assets.dislike)
+    rl.UnloadTexture(assets.birdWingsUp)
+    rl.UnloadTexture(assets.birdWingsDown)
+    rl.UnloadTexture(assets.birdDead)
+    rl.UnloadTexture(assets.sight)
+}
+
 type Target struct {
-    position rl.Vector2
-    velocity rl.Vector2
+    position  rl.Vector2
+    velocity  rl.Vector2
+    direction int
 }
 
 type RemovedTarget struct {
-    position rl.Vector2
-    timer    float32
+    position  rl.Vector2
+    timer     float32
+    direction int
 }
 
 func ShowDeleteAnimation(target RemovedTarget, dt float32) rl.Vector2 {
@@ -100,7 +155,7 @@ func ShowDeleteAnimation(target RemovedTarget, dt float32) rl.Vector2 {
     return target.position
 }
 
-func UpdateAnimation(game *Game, dt float32) {
+func (game *Game) updateAnimations(dt float32) {
     for i := range game.removedTargets {
         game.removedTargets[i].position = ShowDeleteAnimation(game.removedTargets[i], dt)
     }
@@ -153,13 +208,14 @@ func SaveScore(score int, filename string) error {
     return nil
 }
 
-func LoadScores(filename string) ([]int, error) {
+func (game *Game) loadScores(filename string) {
     data, err := os.ReadFile(filename)
     if err != nil {
         if os.IsNotExist(err) {
-            return []int{}, nil
+            game.scores = []int{}
         }
-        return nil, err
+        fmt.Printf("Error loading scores: %s\n", err)
+        return
     }
 
     lines := strings.Split(string(data), "\n")
@@ -167,16 +223,17 @@ func LoadScores(filename string) ([]int, error) {
     scores := make([]int, 0)
     for _, line := range lines {
         if line == "" {
-            continue 
+            continue
         }
         score, err := strconv.Atoi(line)
         if err != nil {
-            return nil, err
+            fmt.Printf("Error parsing scores: %s\n", err)
         }
         scores = append(scores, score)
     }
 
-    return scores, nil
+    sort.Sort(sort.Reverse(sort.IntSlice(scores)))
+    game.scores = scores
 }
 
 func DrawHighScores(scores []int, font rl.Font, position rl.Vector2, fontSize float32, spacing float32, color rl.Color) {
@@ -184,24 +241,43 @@ func DrawHighScores(scores []int, font rl.Font, position rl.Vector2, fontSize fl
 
     title := "High Scores:"
     rl.DrawTextEx(font, title, rl.Vector2{X: position.X, Y: y}, fontSize, spacing, color)
-    y += fontSize + 10 
+    y += fontSize + 10
     for i, score := range scores {
         text := fmt.Sprintf("%d. %d", i+1, score)
 
         rl.DrawTextEx(font, text, rl.Vector2{X: position.X, Y: y}, fontSize, spacing, color)
 
         y += fontSize + 5
+        if i == 9 {
+            return
+        }
     }
 }
 
-func Update(game *Game, settings *Settings) {
-    dt := rl.GetFrameTime()
-    game.timer += dt
+func (game *Game) Update() {
+    game.handleInput()
+    game.updateState()
 
-    game.ballPosition = rl.GetMousePosition()
+    rl.BeginDrawing()
 
+    game.draw()
+    game.handleUI()
+
+    rl.EndDrawing()
+}
+
+func (game *Game) handleUI() {
     switch game.currentState {
     case Menu:
+        rl.DrawTextureEx(
+            game.assets.bgMenu,
+            rl.Vector2{X: 0, Y: 0},
+            0,
+            10,
+            rl.White)
+
+        DrawHighScores(game.scores, game.assets.font, rl.NewVector2(600, 130), 30, 2, rl.GetColor(0xff0000ff))
+
         if rg.Button(rl.Rectangle{X: 50, Y: 150, Width: 100, Height: 50}, "START") {
             game.currentState = InGame
         }
@@ -211,7 +287,7 @@ func Update(game *Game, settings *Settings) {
         }
 
         if rg.Button(rl.Rectangle{X: 50, Y: 350, Width: 100, Height: 50}, "Quit") {
-            rl.CloseWindow()
+            game.shouldClose = true
         }
     case InSettings:
         if rl.IsKeyPressed(rl.KeyEscape) || rg.Button(rl.Rectangle{X: 10, Y: 10, Width: 20, Height: 20}, "#114#") {
@@ -219,99 +295,49 @@ func Update(game *Game, settings *Settings) {
         }
 
         text := ""
-        if settings.fullscreen {
+        if game.settings.fullscreen {
             text = "Fullscreen"
         } else {
             text = "Window"
         }
 
         if rg.Button(rl.Rectangle{X: 300, Y: 50, Width: 200, Height: 50}, text) {
-            settings.fullscreen = !settings.fullscreen
+            game.settings.fullscreen = !game.settings.fullscreen
             rl.ToggleFullscreen()
         }
 
-        if rg.Button(rl.Rectangle{X: 300, Y: 150, Width: 200, Height: 50}, settings.currentResolution) {
-            screenResLen := len(settings.screenResolution)
+        if rg.Button(rl.Rectangle{X: 300, Y: 150, Width: 200, Height: 50}, game.settings.currentResolution) {
+            screenResLen := len(game.settings.screenResolution)
 
-            for i, resolution := range settings.screenResolution {
-                if resolution == settings.currentResolution && (i+1) != screenResLen {
-                    settings.currentResolution = settings.screenResolution[i+1]
-                    SetWindowSize(settings.currentResolution)
+            for i, resolution := range game.settings.screenResolution {
+                if resolution == game.settings.currentResolution && (i+1) != screenResLen {
+                    game.settings.currentResolution = game.settings.screenResolution[i+1]
+                    SetWindowSize(game.settings.currentResolution)
                     break
                 } else if i == screenResLen-1 {
-                    settings.currentResolution = settings.screenResolution[0]
-                    SetWindowSize(settings.currentResolution)
+                    game.settings.currentResolution = game.settings.screenResolution[0]
+                    SetWindowSize(game.settings.currentResolution)
                 }
             }
         }
 
-        settings.gameVolume = rg.SliderBar(rl.Rectangle{X: 300, Y: 250, Width: 200, Height: 50}, "Volume", "", settings.gameVolume, 0, 1)
+        game.settings.gameVolume = rg.SliderBar(rl.Rectangle{X: 300, Y: 250, Width: 200, Height: 50}, "Volume", "", game.settings.gameVolume, 0, 1)
 
     case InGame:
-        if rl.IsKeyDown(rl.KeyEscape) {
-            game.currentState = Pause
-        }
 
-        if game.timer-game.lastSpawnTime >= game.spawnInterval {
-            side := rand.IntN(2)
+        text := fmt.Sprintf("Score: %d", game.score)
+        rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0xcb65f7ff))
+        rl.DrawTextureV(game.assets.dislike, rl.Vector2{X: 10, Y: 60}, rl.White)
+        text = fmt.Sprintf(": %d", game.escapedBird)
+        rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: float32(10 + game.assets.dislike.Width), Y: 60}, 45, 10, rl.GetColor(0xf7658eff))
 
-            var x, y float32
-            var velocity rl.Vector2
-            y = rand.Float32()*(ScreenHeight-2.0*game.targetRadius) + game.targetRadius
-
-            switch side {
-            case 0: // Left
-                x = -game.targetRadius
-                velocity = rl.NewVector2(1, 0) // Move right
-            case 1: // Right
-                x = ScreenWidth + game.targetRadius
-                velocity = rl.NewVector2(-1, 0) // Move left
-            }
-
-            speed := rand.Float32()*300 + 100
-            velocity = rl.Vector2Scale(velocity, speed)
-
-            game.targets = append(game.targets, Target{
-                position: rl.NewVector2(x, y),
-                velocity: velocity,
-            })
-
-            game.lastSpawnTime = game.timer
-
-            if game.spawnInterval > 0.5 {
-                game.spawnInterval -= 0.1 * dt
-            }
-        }
-
-        for i := range game.targets {
-            game.targets[i].position = rl.Vector2Add(game.targets[i].position, rl.Vector2Scale(game.targets[i].velocity, dt))
-        }
-
-        if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-            targets := make([]Target, len(game.targets))
-            index := 0
-            for _, target := range game.targets {
-                if !rl.CheckCollisionPointCircle(rl.GetMousePosition(), target.position, game.targetRadius-10) {
-                    targets[index] = target
-                    index++
-                } else {
-                    game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0})
-                    game.score++
-                }
-            }
-            game.targets = targets[:index]
-        }
-
-        UpdateAnimation(game, dt)
-
-        if len(game.targets) >= 15 {
-            for _, target := range game.targets {
-                game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0})
-            }
-            game.targets = make([]Target, 0)
-            game.currentState = GameOver
-        }
     case Pause:
+        text := fmt.Sprintf("Score: %d", game.score)
+        rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+        text = "Pause"
+        pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+        rl.DrawTextEx(game.assets.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
+
         if rg.Button(rl.Rectangle{X: 50, Y: 350, Width: 100, Height: 50}, "Continue") {
             game.currentState = InGame
         }
@@ -320,19 +346,15 @@ func Update(game *Game, settings *Settings) {
             if err != nil {
                 fmt.Println("Error saving score:", err)
             }
-            rl.CloseWindow()
+            game.shouldClose = true
         }
+
     case GameOver:
-        UpdateAnimation(game, dt)
-        if !game.isSaved {
-            err := SaveScore(game.score, "score.txt")
-            if err != nil {
-                fmt.Println("Error saving score:", err)
-            }
-            game.isSaved = true
-        }
-        game.scores, _ = LoadScores("score.txt")
-        sort.Sort(sort.Reverse(sort.IntSlice(game.scores)))
+        DrawHighScores(game.scores, game.assets.font, rl.NewVector2(50, 150), 30, 2, rl.GetColor(0x4d2f1fff))
+        text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
+        pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+
+        rl.DrawTextEx(game.assets.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
 
         if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Retry") {
             game.score = 0
@@ -340,52 +362,223 @@ func Update(game *Game, settings *Settings) {
             game.timer = 0
             game.lastSpawnTime = 0
             game.removedTargets = make([]RemovedTarget, 0)
-            game.isSaved = false
+            game.escapedBird = 0
             game.currentState = InGame
         }
 
         if rg.Button(rl.Rectangle{X: 400, Y: 350, Width: 100, Height: 50}, "Quit") {
-            rl.CloseWindow()
+            game.shouldClose = true
         }
+
     }
+}
 
-    rl.BeginDrawing()
+func (game *Game) draw() {
+    rl.ClearBackground(rl.GetColor(0x553a7aff))
 
-    rl.ClearBackground(rl.GetColor(0xf9d8c2FF))
-    rl.DrawCircleV(game.ballPosition, 40, game.ballColor)
-    for _, target := range game.targets {
-        rl.DrawCircleV(target.position, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
+    switch game.currentState {
+    case InGame:
+        rl.DrawTextureEx(
+            game.assets.bgGame,
+            rl.Vector2{X: 0, Y: 0},
+            0,
+            10,
+            rl.White)
+
+        for _, target := range game.targets {
+            if target.direction == -1 {
+                flipRec := rl.NewRectangle(
+                    float32(game.assets.birdWingsUp.Width),
+                    0,
+                    -float32(game.assets.birdWingsUp.Width),
+                    float32(game.assets.birdWingsUp.Height))
+                rl.DrawTextureRec(
+                    game.assets.birdWingsUp,
+                    flipRec,
+                    rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
+                    rl.White)
+            } else {
+                rl.DrawTextureV(
+                    game.assets.birdWingsUp,
+                    rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
+                    rl.White)
+            }
+        }
+
+        for _, removedTarget := range game.removedTargets {
+            if removedTarget.direction == -1 {
+                flipRec := rl.NewRectangle(
+                    float32(game.assets.birdDead.Width),
+                    0,
+                    -float32(game.assets.birdDead.Width),
+                    float32(game.assets.birdDead.Height))
+                rl.DrawTextureRec(
+                    game.assets.birdDead,
+                    flipRec,
+                    rl.Vector2{X: removedTarget.position.X - TargetRadius, Y: removedTarget.position.Y - TargetRadius - 10},
+                    rl.White)
+            } else {
+                rl.DrawTextureV(
+                    game.assets.birdDead,
+                    rl.Vector2{X: removedTarget.position.X - TargetRadius, Y: removedTarget.position.Y - TargetRadius - 10},
+                    rl.White)
+            }
+        }
+
+        if game.showBanner {
+            color := rl.ColorAlpha(rl.White, game.bannerAlpha)
+            rl.DrawTextureEx(game.assets.banner, rl.Vector2{X: 100, Y: 100}, 0, 10, color)
+        }
+
+        rl.DrawTextureEx(
+            game.assets.sight,
+            rl.Vector2{X: game.ballPosition.X - 32*game.settings.scale - 1, Y: game.ballPosition.Y - 32*game.settings.scale},
+            0,
+            game.settings.scale,
+            rl.White)
     }
+}
 
-    for _, removedTarget := range game.removedTargets {
-        rl.DrawCircleV(removedTarget.position, float32(game.targetRadius-10), rl.GetColor(0x9f80fcff))
+func (game *Game) updateState() {
+    dt := rl.GetFrameTime()
+    game.timer += dt
+
+    if game.currentState == InGame {
+        rl.HideCursor()
+    } else {
+        rl.ShowCursor()
     }
 
     switch game.currentState {
-    case Menu:
-        DrawHighScores(game.scores, game.font, rl.NewVector2(300, 150), 30, 2, rl.GetColor(0x4d2f1fff))
-
     case InGame:
-
-        text := fmt.Sprintf("Score: %d", game.score)
-        rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
-
-    case Pause:
-        text := fmt.Sprintf("Score: %d", game.score)
-        rl.DrawTextEx(game.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
-        text = "Pause"
-        pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-        rl.DrawTextEx(game.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
-
-    case GameOver:
-        DrawHighScores(game.scores, game.font, rl.NewVector2(50, 150), 30, 2, rl.GetColor(0x4d2f1fff))
-        text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
-        pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-
-        rl.DrawTextEx(game.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
+        game.spawnBirds(dt)
+        game.updateBirds(dt)
+        game.updateBanner(dt)
+        game.updateAnimations(dt)
 
     }
-    rl.EndDrawing()
+}
+
+func (game *Game) saveScore() {
+    file, err := os.OpenFile("score.txt", os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        fmt.Printf("Error opening file: %s\n", err)
+        return
+    }
+    defer file.Close()
+
+    for _, score := range game.scores {
+        scoreStr := fmt.Sprintf("%d\n", score)
+        _, err = file.WriteString(scoreStr)
+        if err != nil {
+            fmt.Printf("Error writing file: %s\n", err)
+            return
+        }
+    }
+}
+
+func (game *Game) updateBanner(dt float32) {
+    if game.showBanner {
+        game.bannerTimer -= dt
+        if game.bannerTimer <= 0 {
+            game.showBanner = false
+        }
+    }
+    game.bannerAlpha = game.bannerTimer / BannerTimeMax
+}
+
+func (game *Game) updateBirds(dt float32) {
+    for i := range game.targets {
+        game.targets[i].position = rl.Vector2Add(game.targets[i].position, rl.Vector2Scale(game.targets[i].velocity, dt))
+    }
+
+    if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+        targets := make([]Target, len(game.targets))
+        index := 0
+        for _, target := range game.targets {
+            if !rl.CheckCollisionPointCircle(rl.GetMousePosition(), target.position, TargetRadius-10) {
+                targets[index] = target
+                index++
+            } else {
+                game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0, direction: target.direction})
+                game.score++
+            }
+        }
+        game.targets = targets[:index]
+    }
+
+    var newTargets []Target
+    for _, target := range game.targets {
+        if (target.direction == 1 && target.position.X > float32(rl.GetScreenWidth())+TargetRadius) ||
+            (target.direction == -1 && target.position.X < float32(0-TargetRadius)) {
+            game.escapedBird++
+            game.showBanner = !game.showBanner
+            game.bannerTimer = BannerTimeMax
+        } else {
+            newTargets = append(newTargets, target)
+        }
+    }
+    game.targets = newTargets
+
+    if game.escapedBird >= 10 {
+        for _, target := range game.targets {
+            game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0})
+        }
+        game.targets = make([]Target, 0)
+        game.scores = append(game.scores, game.score)
+        sort.Sort(sort.Reverse(sort.IntSlice(game.scores)))
+        go game.saveScore()
+        game.currentState = GameOver
+    }
+}
+
+func (game *Game) spawnBirds(dt float32) {
+    if game.timer-game.lastSpawnTime >= game.spawnInterval {
+        side := rand.IntN(2)
+
+        var x, y float32
+        var velocity rl.Vector2
+        var direction int
+        y = rand.Float32()*(ScreenHeight-2.0*TargetRadius) + TargetRadius
+
+        switch side {
+        case 0:
+            x = -TargetRadius
+            velocity = rl.NewVector2(1, 0)
+            direction = 1
+        case 1:
+            x = ScreenWidth + TargetRadius
+            velocity = rl.NewVector2(-1, 0)
+            direction = -1
+        }
+
+        speed := rand.Float32()*300 + 100
+        velocity = rl.Vector2Scale(velocity, speed)
+
+        game.targets = append(game.targets, Target{
+            position:  rl.NewVector2(x, y),
+            velocity:  velocity,
+            direction: direction,
+        })
+
+        game.lastSpawnTime = game.timer
+
+        if game.spawnInterval > 0.5 {
+            game.spawnInterval -= 0.1 * dt
+        }
+    }
+}
+
+func (game *Game) handleInput() {
+    if rl.WindowShouldClose() {
+        game.shouldClose = true
+    }
+
+    game.ballPosition = rl.GetMousePosition()
+
+    if game.currentState == InGame && rl.IsKeyDown(rl.KeyEscape) {
+        game.currentState = Pause
+    }
 }
 
 func CenterText(text string, fontSize int32, screenWidth int32, screenHeight int32) rl.Vector2 {
@@ -399,21 +592,18 @@ func CenterText(text string, fontSize int32, screenWidth int32, screenHeight int
 }
 
 func main() {
-
     rl.InitWindow(ScreenWidth, ScreenHeight, "Click me!")
     defer rl.CloseWindow()
 
     rl.SetTargetFPS(60)
     rl.SetExitKey(rl.KeyF5)
-    rl.SetWindowState(rl.FlagWindowResizable)
 
     game := NewGame()
-    settings := NewSettigs()
-    game.scores, _ = LoadScores("score.txt")
-    sort.Sort(sort.Reverse(sort.IntSlice(game.scores)))
+    defer game.Destroy()
 
-    for !rl.WindowShouldClose() {
+    game.loadScores("score.txt")
 
-        Update(&game, &settings)
+    for !game.shouldClose {
+        game.Update()
     }
 }
