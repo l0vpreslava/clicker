@@ -1,4 +1,3 @@
-//TODO: Реализовать анимации
 //TODO: Добавить в игру звуковое сопровождение: эффекты нажатия кнопок в меню, эффект нажатия курсора в игре, эффект уничтожения мишени
 //TODO: Привести код в порядок, нормально расставить кнопочки
 //TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
@@ -136,6 +135,9 @@ type Target struct {
     position  rl.Vector2
     velocity  rl.Vector2
     direction int
+    animationFrame int
+    animationTimer float32
+    animationInterval float32
 }
 
 type RemovedTarget struct {
@@ -386,20 +388,26 @@ func (game *Game) draw() {
             rl.White)
 
         for _, target := range game.targets {
+            var birdFrame rl.Texture2D
+            if target.animationFrame == 0 {
+                birdFrame = game.assets.birdWingsUp 
+            } else {
+                birdFrame = game.assets.birdWingsDown
+            }
             if target.direction == -1 {
                 flipRec := rl.NewRectangle(
-                    float32(game.assets.birdWingsUp.Width),
+                    float32(birdFrame.Width),
                     0,
-                    -float32(game.assets.birdWingsUp.Width),
-                    float32(game.assets.birdWingsUp.Height))
+                    -float32(birdFrame.Width),
+                    float32(birdFrame.Height))
                 rl.DrawTextureRec(
-                    game.assets.birdWingsUp,
+                    birdFrame,
                     flipRec,
                     rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
                     rl.White)
             } else {
                 rl.DrawTextureV(
-                    game.assets.birdWingsUp,
+                    birdFrame,
                     rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
                     rl.White)
             }
@@ -490,6 +498,14 @@ func (game *Game) updateBanner(dt float32) {
 func (game *Game) updateBirds(dt float32) {
     for i := range game.targets {
         game.targets[i].position = rl.Vector2Add(game.targets[i].position, rl.Vector2Scale(game.targets[i].velocity, dt))
+
+
+        game.targets[i].animationTimer += dt
+        if game.targets[i].animationTimer >= game.targets[i].animationInterval {
+            game.targets[i].animationFrame = (game.targets[i].animationFrame + 1) % 2 
+            game.targets[i].animationTimer = 0
+        }
+    
     }
 
     if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
@@ -520,7 +536,7 @@ func (game *Game) updateBirds(dt float32) {
     }
     game.targets = newTargets
 
-    if game.escapedBird >= 10 {
+    if game.escapedBird >= 5 {
         for _, target := range game.targets {
             game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0})
         }
@@ -559,6 +575,9 @@ func (game *Game) spawnBirds(dt float32) {
             position:  rl.NewVector2(x, y),
             velocity:  velocity,
             direction: direction,
+            animationFrame: 0,
+            animationTimer: 0,
+            animationInterval: 0.1,
         })
 
         game.lastSpawnTime = game.timer
