@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"os"
 	"sort"
@@ -355,6 +356,7 @@ func (game *Game) handleUI() {
 		}
 
 		game.settings.gameVolume = rg.SliderBar(rl.Rectangle{X: 300, Y: 250, Width: 200, Height: 50}, "Volume", "", game.settings.gameVolume, 0, 1)
+		rl.SetMasterVolume(game.settings.gameVolume)
 
 	case InGame:
 
@@ -647,9 +649,16 @@ func (game *Game) handleInput() {
 
 	game.ballPosition = rl.GetMousePosition()
 
-	if game.currentState == InGame && rl.IsKeyDown(rl.KeyEscape) {
+	
+	if rl.IsKeyPressed(rl.KeyEscape) {
 		rl.PlaySound(game.assets.pause)
-		game.currentState = Pause
+		if game.currentState == InGame {
+			game.currentState = Pause
+		} else if game.currentState == Pause {
+			game.currentState = InGame
+		} else {
+			log.Fatalln("Game state should be InGame or Pause")
+		}
 	}
 }
 
