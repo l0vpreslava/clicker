@@ -1,6 +1,11 @@
-//TODO: Привести код в порядок, нормально расставить кнопочки
-//TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
-//TODO: Выложить игру на itch.io
+// TODO: Привести код в порядок, нормально расставить кнопочки
+// TODO: Оформить вид Game Over
+// TODO: Оформить вид Pause
+// TODO: Разобраться с поддержкой разных разрешений экрана и fullscreen
+// TODO: Пофиксить хитбокс птиц
+// TODO: Добавить визуальный эффект выстрела
+// TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
+// TODO: Выложить игру на itch.io
 
 package main
 
@@ -23,6 +28,11 @@ const (
 	InGame
 	Pause
 	GameOver
+)
+
+const (
+	Left = -1
+	Right = 1
 )
 
 const ScreenWidth = 800.0
@@ -153,7 +163,6 @@ func (assets *Assets) Unload() {
 	rl.UnloadSound(assets.shoot_2)
 	rl.UnloadSound(assets.birdDied_1)
 	rl.UnloadSound(assets.birdDied_2)
-
 }
 
 type Target struct {
@@ -320,6 +329,7 @@ func (game *Game) handleUI() {
 			rl.PlaySound(game.assets.selectButton)
 			game.shouldClose = true
 		}
+
 	case InSettings:
 		if rl.IsKeyPressed(rl.KeyEscape) || rg.Button(rl.Rectangle{X: 10, Y: 10, Width: 20, Height: 20}, "#114#") {
 			rl.PlaySound(game.assets.selectButton)
@@ -359,7 +369,6 @@ func (game *Game) handleUI() {
 		rl.SetMasterVolume(game.settings.gameVolume)
 
 	case InGame:
-
 		text := fmt.Sprintf("Score: %d", game.score)
 		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0xcb65f7ff))
 		rl.DrawTextureV(game.assets.dislike, rl.Vector2{X: 10, Y: 60}, rl.White)
@@ -432,7 +441,8 @@ func (game *Game) draw() {
 			} else {
 				birdFrame = game.assets.birdWingsDown
 			}
-			if target.direction == -1 {
+
+			if target.direction == Left {
 				flipRec := rl.NewRectangle(
 					float32(birdFrame.Width),
 					0,
@@ -443,11 +453,13 @@ func (game *Game) draw() {
 					flipRec,
 					rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
 					rl.White)
-			} else {
+			} else if target.direction == Right {
 				rl.DrawTextureV(
 					birdFrame,
 					rl.Vector2{X: target.position.X - TargetRadius, Y: target.position.Y - TargetRadius - 10},
 					rl.White)
+			} else {
+				log.Fatalln("target.direction should be Left or Right")
 			}
 		}
 
@@ -501,7 +513,6 @@ func (game *Game) updateState() {
 		game.updateBirds(dt)
 		game.updateBanner(dt)
 		game.updateAnimations(dt)
-
 	}
 }
 
@@ -530,6 +541,7 @@ func (game *Game) updateBanner(dt float32) {
 			game.showBanner = false
 		}
 	}
+
 	game.bannerAlpha = game.bannerTimer / BannerTimeMax
 }
 
@@ -573,13 +585,14 @@ func (game *Game) updateBirds(dt float32) {
 				rl.PlaySound(sound)
 			}
 		}
+
 		game.targets = targets[:index]
 	}
 
 	var newTargets []Target
 	for _, target := range game.targets {
-		if (target.direction == 1 && target.position.X > float32(rl.GetScreenWidth())+TargetRadius) ||
-			(target.direction == -1 && target.position.X < float32(0-TargetRadius)) {
+		if (target.direction == Right && target.position.X > float32(rl.GetScreenWidth())+TargetRadius) ||
+			(target.direction == Left && target.position.X < float32(0-TargetRadius)) {
 			game.escapedBird++
 			rl.PlaySound(game.assets.bannerSound)
 			game.showBanner = !game.showBanner
@@ -588,6 +601,7 @@ func (game *Game) updateBirds(dt float32) {
 			newTargets = append(newTargets, target)
 		}
 	}
+
 	game.targets = newTargets
 
 	if game.escapedBird >= 5 {
@@ -604,22 +618,21 @@ func (game *Game) updateBirds(dt float32) {
 
 func (game *Game) spawnBirds(dt float32) {
 	if game.timer-game.lastSpawnTime >= game.spawnInterval {
-		side := rand.IntN(2)
-
 		var x, y float32
 		var velocity rl.Vector2
 		var direction int
 		y = rand.Float32()*(ScreenHeight-2.0*TargetRadius) + TargetRadius
 
-		switch side {
+		switch rand.IntN(2) {
 		case 0:
 			x = -TargetRadius
 			velocity = rl.NewVector2(1, 0)
-			direction = 1
+			direction = Right
+
 		case 1:
 			x = ScreenWidth + TargetRadius
 			velocity = rl.NewVector2(-1, 0)
-			direction = -1
+			direction = Left
 		}
 
 		speed := rand.Float32()*300 + 100
@@ -648,7 +661,6 @@ func (game *Game) handleInput() {
 	}
 
 	game.ballPosition = rl.GetMousePosition()
-
 	
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		rl.PlaySound(game.assets.pause)
