@@ -31,7 +31,7 @@ const (
 )
 
 const (
-	Left = -1
+	Left  = -1
 	Right = 1
 )
 
@@ -661,7 +661,7 @@ func (game *Game) handleInput() {
 	}
 
 	game.ballPosition = rl.GetMousePosition()
-	
+
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		rl.PlaySound(game.assets.pause)
 		if game.currentState == InGame {
