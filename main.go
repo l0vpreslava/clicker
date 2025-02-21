@@ -1,8 +1,6 @@
 // TODO: Привести код в порядок, нормально расставить кнопочки
 // TODO: Оформить вид Game Over
-// TODO: Оформить вид Pause
 // TODO: Разобраться с поддержкой разных разрешений экрана и fullscreen
-// TODO: Пофиксить хитбокс птиц
 // TODO: Добавить визуальный эффект выстрела
 // TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
 // TODO: Выложить игру на itch.io
@@ -38,7 +36,7 @@ const (
 const ScreenWidth = 800.0
 const ScreenHeight = 600.0
 const BannerTimeMax float32 = 0.5
-const TargetRadius float32 = 30
+const TargetRadius float32 = 27
 
 type Game struct {
 	ballPosition   rl.Vector2
@@ -58,6 +56,7 @@ type Game struct {
 	bannerTimer    float32
 	shouldClose    bool
 	bannerAlpha    float32
+    TextColor rl.Color
 }
 
 type Assets struct {
@@ -106,6 +105,7 @@ func NewGame() Game {
 		bannerTimer:    0,
 		shouldClose:    false,
 		bannerAlpha:    0,
+        TextColor: rl.GetColor(0xc655f6ff),
 	}
 }
 
@@ -125,7 +125,7 @@ func NewSettigs() Settings {
 
 func LoadAssets() Assets {
 	return Assets{
-		font:          rl.LoadFont("assets/fonts/pixeleum-48.ttf"),
+		font:          rl.LoadFontEx("assets/fonts/pixeleum-48.ttf", 96, nil, 0),
 		bgMenu:        rl.LoadTexture("assets/sprites/bg-menu.png"),
 		bgGame:        rl.LoadTexture("assets/sprites/bg-game.png"),
 		banner:        rl.LoadTexture("assets/sprites/bg-rep.png"),
@@ -312,7 +312,7 @@ func (game *Game) handleUI() {
 			10,
 			rl.White)
 
-		DrawHighScores(game.scores, game.assets.font, rl.NewVector2(600, 130), 30, 2, rl.GetColor(0xff0000ff))
+		DrawHighScores(game.scores, game.assets.font, rl.NewVector2(600, 130), 32, 2, game.TextColor)
 
 		if rg.Button(rl.Rectangle{X: 50, Y: 150, Width: 100, Height: 50}, "START") {
 			rl.PlaySound(game.assets.selectButton)
@@ -370,23 +370,23 @@ func (game *Game) handleUI() {
 
 	case InGame:
 		text := fmt.Sprintf("Score: %d", game.score)
-		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0xcb65f7ff))
+		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 48, 10, game.TextColor)
 		rl.DrawTextureV(game.assets.dislike, rl.Vector2{X: 10, Y: 60}, rl.White)
 		text = fmt.Sprintf(": %d", game.escapedBird)
-		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: float32(10 + game.assets.dislike.Width), Y: 60}, 45, 10, rl.GetColor(0xf7658eff))
+		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: float32(10 + game.assets.dislike.Width), Y: 60}, 48, 10, game.TextColor)
 
 	case Pause:
 		text := fmt.Sprintf("Score: %d", game.score)
-		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 45, 10, rl.GetColor(0x4d2f1fff))
+		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 48, 10, game.TextColor)
 		text = "Pause"
 		pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-		rl.DrawTextEx(game.assets.font, text, pos, 50, 10, rl.GetColor(0x4d2f1fff))
+		rl.DrawTextEx(game.assets.font, text, pos, 48, 10, game.TextColor)
 
-		if rg.Button(rl.Rectangle{X: 50, Y: 350, Width: 100, Height: 50}, "Continue") {
+		if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Continue") {
 			rl.PlaySound(game.assets.startGame)
 			game.currentState = InGame
 		}
-		if rg.Button(rl.Rectangle{X: 150, Y: 350, Width: 100, Height: 50}, "Quit and save result") {
+		if rg.Button(rl.Rectangle{X: 450, Y: 350, Width: 100, Height: 50}, "Quit and save") {
 			rl.PlaySound(game.assets.selectButton)
 			err := SaveScore(game.score, "score.txt")
 			if err != nil {
@@ -396,13 +396,13 @@ func (game *Game) handleUI() {
 		}
 
 	case GameOver:
-		DrawHighScores(game.scores, game.assets.font, rl.NewVector2(50, 150), 30, 2, rl.GetColor(0x4d2f1fff))
+		DrawHighScores(game.scores, game.assets.font, rl.NewVector2(50, 150), 32, 2, game.TextColor)
 		text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
-		pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
+		pos := CenterText(text, 48, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
 
-		rl.DrawTextEx(game.assets.font, text, pos, 45, 10, rl.GetColor(0x4d2f1fff))
+		rl.DrawTextEx(game.assets.font, text, pos, 48, 10, game.TextColor)
 
-		if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Retry") {
+		if rg.Button(rl.Rectangle{X: 250, Y: 400, Width: 100, Height: 50}, "Retry") {
 			rl.PlaySound(game.assets.selectButton)
 			game.score = 0
 			game.targets = make([]Target, 0)
@@ -414,7 +414,7 @@ func (game *Game) handleUI() {
 			game.currentState = InGame
 		}
 
-		if rg.Button(rl.Rectangle{X: 400, Y: 350, Width: 100, Height: 50}, "Quit") {
+		if rg.Button(rl.Rectangle{X: 400, Y: 400, Width: 100, Height: 50}, "Quit") {
 			rl.PlaySound(game.assets.selectButton)
 			game.shouldClose = true
 		}
@@ -441,7 +441,7 @@ func (game *Game) draw() {
 			} else {
 				birdFrame = game.assets.birdWingsDown
 			}
-
+            
 			if target.direction == Left {
 				flipRec := rl.NewRectangle(
 					float32(birdFrame.Width),
@@ -494,6 +494,17 @@ func (game *Game) draw() {
 			0,
 			game.settings.scale,
 			rl.White)
+
+        case Pause:
+            rl.DrawTextureEx(
+                game.assets.bgGame,
+                rl.Vector2{X: 0, Y: 0},
+                0,
+                10,
+                rl.White)
+            rl.DrawRectangleV(
+            rl.Vector2{X: 0, Y: float32(rl.GetScreenHeight())/2 - 35}, rl.Vector2{X: float32(rl.GetScreenWidth()), Y: 150}, rl.GetColor(0xffffff99))
+            
 	}
 }
 
@@ -569,7 +580,7 @@ func (game *Game) updateBirds(dt float32) {
 		targets := make([]Target, len(game.targets))
 		index := 0
 		for _, target := range game.targets {
-			if !rl.CheckCollisionPointCircle(rl.GetMousePosition(), target.position, TargetRadius-10) {
+			if !rl.CheckCollisionPointCircle(rl.GetMousePosition(), target.position, TargetRadius) {
 				targets[index] = target
 				index++
 			} else {
