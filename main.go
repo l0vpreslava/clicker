@@ -1,7 +1,3 @@
-// TODO: Привести код в порядок, нормально расставить кнопочки
-// TODO: Оформить вид Game Over
-// TODO: Разобраться с поддержкой разных разрешений экрана и fullscreen
-// TODO: Добавить визуальный эффект выстрела
 // TODO: Разобраться в кросс-компиляции попробовать подготовить релиз игры под Макос, Винду и Линукс
 // TODO: Выложить игру на itch.io
 
@@ -33,10 +29,11 @@ const (
 	Right = 1
 )
 
-const ScreenWidth = 800.0
-const ScreenHeight = 600.0
+const WorldWidth = 640
+const WorldHeight = 360
 const BannerTimeMax float32 = 0.5
 const TargetRadius float32 = 27
+var PossibleScales = []float32{1, 2, 2.5, 3, 3.5, 4, 6}
 
 type Game struct {
 	ballPosition   rl.Vector2
@@ -57,6 +54,7 @@ type Game struct {
 	shouldClose    bool
 	bannerAlpha    float32
     TextColor rl.Color
+	RenderTexture rl.RenderTexture2D
 }
 
 type Assets struct {
@@ -80,11 +78,9 @@ type Assets struct {
 }
 
 type Settings struct {
-	screenResolution  []string
-	currentResolution string
 	fullscreen        bool
 	gameVolume        float32
-	scale             float32
+	scaleIndex             int
 }
 
 func NewGame() Game {
@@ -106,20 +102,20 @@ func NewGame() Game {
 		shouldClose:    false,
 		bannerAlpha:    0,
         TextColor: rl.GetColor(0xc655f6ff),
+		RenderTexture: rl.LoadRenderTexture(WorldWidth, WorldHeight),
 	}
 }
 
 func (game *Game) Destroy() {
 	game.assets.Unload()
+	rl.UnloadRenderTexture(game.RenderTexture)
 }
 
 func NewSettigs() Settings {
 	return Settings{
-		screenResolution:  []string{"800x600", "1200x800", "1440x900"},
-		currentResolution: "800x600",
 		fullscreen:        false,
 		gameVolume:        0.50,
-		scale:             1.5,
+		scaleIndex:			1,
 	}
 }
 
@@ -205,28 +201,6 @@ func (game *Game) updateAnimations(dt float32) {
 	game.removedTargets = newRemovedTargets
 }
 
-func SetWindowSize(resolution string) {
-	parts := strings.Split(resolution, "x")
-	if len(parts) != 2 {
-		fmt.Println("Invalid resolution format.")
-		return
-	}
-
-	width, err := strconv.Atoi(parts[0])
-	if err != nil {
-		fmt.Println("Error converting width:", err)
-		return
-	}
-
-	height, err := strconv.Atoi(parts[1])
-	if err != nil {
-		fmt.Println("Error converting height:", err)
-		return
-	}
-
-	rl.SetWindowSize(width, height)
-}
-
 func SaveScore(score int, filename string) error {
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -303,29 +277,39 @@ func (game *Game) Update() {
 }
 
 func (game *Game) handleUI() {
+	centreScreenWidth := rl.GetScreenWidth() / 2
+	centreScreenHeight := rl.GetScreenHeight() / 2
+	xButton := float32(centreScreenWidth) - 200/2
 	switch game.currentState {
 	case Menu:
-		rl.DrawTextureEx(
+		rl.DrawTexturePro(
 			game.assets.bgMenu,
-			rl.Vector2{X: 0, Y: 0},
+			getTextureSize(game.assets.bgMenu),
+			rl.Rectangle{Width: float32(rl.GetScreenWidth()), Height: float32(rl.GetScreenHeight())},
+			rl.Vector2{},
 			0,
-			10,
 			rl.White)
 
-		DrawHighScores(game.scores, game.assets.font, rl.NewVector2(600, 130), 32, 2, game.TextColor)
+		DrawHighScores(
+			game.scores,
+			game.assets.font,
+			rl.NewVector2(float32(rl.GetScreenWidth())-300, float32(160)),
+			32,
+			2,
+			game.TextColor)
 
-		if rg.Button(rl.Rectangle{X: 50, Y: 150, Width: 100, Height: 50}, "START") {
+		if rg.Button(rl.Rectangle{X: float32(centreScreenWidth)/2, Y: float32(centreScreenHeight) - 100, Width: 200, Height: 50}, "START") {
 			rl.PlaySound(game.assets.selectButton)
 			rl.PlaySound(game.assets.startGame)
 			game.currentState = InGame
 		}
 
-		if rg.Button(rl.Rectangle{X: 50, Y: 250, Width: 100, Height: 50}, "Settings") {
+		if rg.Button(rl.Rectangle{X: float32(centreScreenWidth)/2, Y: float32(centreScreenHeight), Width: 200, Height: 50}, "Settings") {
 			rl.PlaySound(game.assets.selectButton)
 			game.currentState = InSettings
 		}
 
-		if rg.Button(rl.Rectangle{X: 50, Y: 350, Width: 100, Height: 50}, "Quit") {
+		if rg.Button(rl.Rectangle{X: float32(centreScreenWidth)/2, Y: float32(centreScreenHeight) + 100, Width: 200, Height: 50}, "Quit") {
 			rl.PlaySound(game.assets.selectButton)
 			game.shouldClose = true
 		}
@@ -343,29 +327,23 @@ func (game *Game) handleUI() {
 			text = "Window"
 		}
 
-		if rg.Button(rl.Rectangle{X: 300, Y: 50, Width: 200, Height: 50}, text) {
+		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) - 200, Width: 200, Height: 50}, text) {
 			rl.PlaySound(game.assets.selectButton)
 			game.settings.fullscreen = !game.settings.fullscreen
 			rl.ToggleFullscreen()
 		}
 
-		if rg.Button(rl.Rectangle{X: 300, Y: 150, Width: 200, Height: 50}, game.settings.currentResolution) {
+		currentResolution := fmt.Sprintf("%dx%d", rl.GetScreenWidth(), rl.GetScreenHeight())
+		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) -100, Width: 200, Height: 50}, currentResolution) {
 			rl.PlaySound(game.assets.selectButton)
-			screenResLen := len(game.settings.screenResolution)
+			game.settings.scaleIndex = (game.settings.scaleIndex + 1) % len(PossibleScales)
+			w := WorldWidth * PossibleScales[game.settings.scaleIndex]
+			h := WorldHeight * PossibleScales[game.settings.scaleIndex]
+			rl.SetWindowSize(int(w), int(h))
 
-			for i, resolution := range game.settings.screenResolution {
-				if resolution == game.settings.currentResolution && (i+1) != screenResLen {
-					game.settings.currentResolution = game.settings.screenResolution[i+1]
-					SetWindowSize(game.settings.currentResolution)
-					break
-				} else if i == screenResLen-1 {
-					game.settings.currentResolution = game.settings.screenResolution[0]
-					SetWindowSize(game.settings.currentResolution)
-				}
-			}
 		}
 
-		game.settings.gameVolume = rg.SliderBar(rl.Rectangle{X: 300, Y: 250, Width: 200, Height: 50}, "Volume", "", game.settings.gameVolume, 0, 1)
+		game.settings.gameVolume = rg.SliderBar(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight), Width: 200, Height: 50}, "Volume", "", game.settings.gameVolume, 0, 1)
 		rl.SetMasterVolume(game.settings.gameVolume)
 
 	case InGame:
@@ -380,13 +358,18 @@ func (game *Game) handleUI() {
 		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: 10, Y: 10}, 48, 10, game.TextColor)
 		text = "Pause"
 		pos := CenterText(text, 50, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
-		rl.DrawTextEx(game.assets.font, text, pos, 48, 10, game.TextColor)
-
-		if rg.Button(rl.Rectangle{X: 250, Y: 350, Width: 100, Height: 50}, "Continue") {
+		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: pos.X, Y: pos.Y - 150}, 48, 10, game.TextColor)
+		
+		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) - 100, Width: 200, Height: 50}, "Continue") {
 			rl.PlaySound(game.assets.startGame)
 			game.currentState = InGame
 		}
-		if rg.Button(rl.Rectangle{X: 450, Y: 350, Width: 100, Height: 50}, "Quit and save") {
+
+		if  rg.Button(rl.Rectangle{X: xButton , Y: float32(centreScreenHeight), Width: 200, Height: 50}, "#185# Menu") {
+			rl.PlaySound(game.assets.selectButton)
+			game.currentState = Menu
+		}
+		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) + 100, Width: 150, Height: 50}, "#002# Quit") {
 			rl.PlaySound(game.assets.selectButton)
 			err := SaveScore(game.score, "score.txt")
 			if err != nil {
@@ -400,9 +383,9 @@ func (game *Game) handleUI() {
 		text := fmt.Sprintf("GAME OVER\n score: %d", game.score)
 		pos := CenterText(text, 48, int32(rl.GetScreenWidth()), int32(rl.GetScreenHeight()))
 
-		rl.DrawTextEx(game.assets.font, text, pos, 48, 10, game.TextColor)
+		rl.DrawTextEx(game.assets.font, text, rl.Vector2{X: pos.X, Y: pos.Y - 150}, 48, 10, game.TextColor)
 
-		if rg.Button(rl.Rectangle{X: 250, Y: 400, Width: 100, Height: 50}, "Retry") {
+		if rg.Button(rl.Rectangle{X: xButton - 100, Y: float32(centreScreenHeight), Width: 200, Height: 50}, "Retry") {
 			rl.PlaySound(game.assets.selectButton)
 			game.score = 0
 			game.targets = make([]Target, 0)
@@ -414,7 +397,7 @@ func (game *Game) handleUI() {
 			game.currentState = InGame
 		}
 
-		if rg.Button(rl.Rectangle{X: 400, Y: 400, Width: 100, Height: 50}, "Quit") {
+		if rg.Button(rl.Rectangle{X: xButton + 150, Y: float32(centreScreenHeight), Width: 200, Height: 50}, "Quit") {
 			rl.PlaySound(game.assets.selectButton)
 			game.shouldClose = true
 		}
@@ -423,17 +406,12 @@ func (game *Game) handleUI() {
 }
 
 func (game *Game) draw() {
+	rl.BeginTextureMode(game.RenderTexture)
 	rl.ClearBackground(rl.GetColor(0x553a7aff))
 
 	switch game.currentState {
 	case InGame:
-		rl.DrawTextureEx(
-			game.assets.bgGame,
-			rl.Vector2{X: 0, Y: 0},
-			0,
-			10,
-			rl.White)
-
+		game.drawBackground()
 		for _, target := range game.targets {
 			var birdFrame rl.Texture2D
 			if target.animationFrame == 0 {
@@ -441,7 +419,7 @@ func (game *Game) draw() {
 			} else {
 				birdFrame = game.assets.birdWingsDown
 			}
-            
+
 			if target.direction == Left {
 				flipRec := rl.NewRectangle(
 					float32(birdFrame.Width),
@@ -485,27 +463,69 @@ func (game *Game) draw() {
 
 		if game.showBanner {
 			color := rl.ColorAlpha(rl.White, game.bannerAlpha)
-			rl.DrawTextureEx(game.assets.banner, rl.Vector2{X: 100, Y: 100}, 0, 10, color)
+			var padding float32 = 50.0
+			renderTextureSize := getTextureSize(game.RenderTexture.Texture)
+			destRec := rl.Rectangle{
+				X: float32(padding), 
+				Y: float32(padding), 
+				Width: renderTextureSize.Width - 2.0*padding,
+				Height: renderTextureSize.Height - 2.0*padding,
+			}
+			rl.DrawTexturePro(
+				game.assets.banner, 
+				getTextureSize(game.assets.banner),
+				destRec,
+				rl.Vector2{},
+				0,
+				color)
 		}
 
 		rl.DrawTextureEx(
 			game.assets.sight,
-			rl.Vector2{X: game.ballPosition.X - 32*game.settings.scale - 1, Y: game.ballPosition.Y - 32*game.settings.scale},
+			rl.Vector2SubtractValue(getMouseWorldPos(), 32),
 			0,
-			game.settings.scale,
+			1,
 			rl.White)
 
         case Pause:
-            rl.DrawTextureEx(
-                game.assets.bgGame,
-                rl.Vector2{X: 0, Y: 0},
-                0,
-                10,
-                rl.White)
-            rl.DrawRectangleV(
-            rl.Vector2{X: 0, Y: float32(rl.GetScreenHeight())/2 - 35}, rl.Vector2{X: float32(rl.GetScreenWidth()), Y: 150}, rl.GetColor(0xffffff99))
-            
+		game.drawBackground()
+
 	}
+	rl.EndTextureMode()
+	sourceRec := rl.Rectangle{
+		X: 0,
+		Y: 0,
+		Width: float32(game.RenderTexture.Texture.Width),
+		Height: -float32(game.RenderTexture.Texture.Height),
+	}
+	scale := PossibleScales[game.settings.scaleIndex]
+	destRec := rl.Rectangle{
+		X: -float32(scale),
+		Y: -float32(scale),
+		Width: float32(rl.GetScreenWidth()) + scale*2,
+		Height: float32(rl.GetScreenHeight()) + scale*2,
+	}
+	rl.DrawTexturePro(
+		game.RenderTexture.Texture,
+		sourceRec,
+		destRec,
+		rl.Vector2{},
+		0,
+		rl.White)
+}
+
+func (game *Game) drawBackground() {
+	rl.DrawTexturePro(
+		game.assets.bgGame,
+		getTextureSize(game.assets.bgGame),
+		getTextureSize(game.RenderTexture.Texture),
+		rl.Vector2{},
+		0,
+		rl.White)
+}
+
+func getTextureSize(texture rl.Texture2D) rl.Rectangle {
+	return rl.Rectangle{X: 0, Y:0 , Width: float32(texture.Width), Height: float32(texture.Height)}
 }
 
 func (game *Game) updateState() {
@@ -569,6 +589,7 @@ func (game *Game) updateBirds(dt float32) {
 	}
 
 	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+		worldPos := getMouseWorldPos()
 		var sound rl.Sound
 		if rand.IntN(2) == 0 {
 			sound = game.assets.shoot_1
@@ -580,7 +601,7 @@ func (game *Game) updateBirds(dt float32) {
 		targets := make([]Target, len(game.targets))
 		index := 0
 		for _, target := range game.targets {
-			if !rl.CheckCollisionPointCircle(rl.GetMousePosition(), target.position, TargetRadius) {
+			if !rl.CheckCollisionPointCircle(worldPos, target.position, TargetRadius) {
 				targets[index] = target
 				index++
 			} else {
@@ -602,8 +623,8 @@ func (game *Game) updateBirds(dt float32) {
 
 	var newTargets []Target
 	for _, target := range game.targets {
-		if (target.direction == Right && target.position.X > float32(rl.GetScreenWidth())+TargetRadius) ||
-			(target.direction == Left && target.position.X < float32(0-TargetRadius)) {
+		if (target.direction == Right && target.position.X > float32(WorldWidth) +TargetRadius) ||
+			(target.direction == Left && target.position.X <  0 - TargetRadius) {
 			game.escapedBird++
 			rl.PlaySound(game.assets.bannerSound)
 			game.showBanner = !game.showBanner
@@ -615,7 +636,7 @@ func (game *Game) updateBirds(dt float32) {
 
 	game.targets = newTargets
 
-	if game.escapedBird >= 5 {
+	if game.escapedBird >= 10 {
 		for _, target := range game.targets {
 			game.removedTargets = append(game.removedTargets, RemovedTarget{position: target.position, timer: 0})
 		}
@@ -627,12 +648,19 @@ func (game *Game) updateBirds(dt float32) {
 	}
 }
 
+func getMouseWorldPos() rl.Vector2 {
+	worldX := (rl.GetMousePosition().X / float32(rl.GetScreenWidth())) * WorldWidth
+	worldY := (rl.GetMousePosition().Y / float32(rl.GetScreenHeight())) * WorldHeight
+	worldPos := rl.Vector2{X: worldX, Y: worldY}
+	return worldPos
+}
+
 func (game *Game) spawnBirds(dt float32) {
 	if game.timer-game.lastSpawnTime >= game.spawnInterval {
 		var x, y float32
 		var velocity rl.Vector2
 		var direction int
-		y = rand.Float32()*(ScreenHeight-2.0*TargetRadius) + TargetRadius
+		y = rand.Float32()*(WorldHeight-2.0*TargetRadius) + TargetRadius
 
 		switch rand.IntN(2) {
 		case 0:
@@ -641,7 +669,7 @@ func (game *Game) spawnBirds(dt float32) {
 			direction = Right
 
 		case 1:
-			x = ScreenWidth + TargetRadius
+			x = float32(WorldWidth) + TargetRadius
 			velocity = rl.NewVector2(-1, 0)
 			direction = Left
 		}
@@ -696,7 +724,7 @@ func CenterText(text string, fontSize int32, screenWidth int32, screenHeight int
 }
 
 func main() {
-	rl.InitWindow(ScreenWidth, ScreenHeight, "Click me!")
+	rl.InitWindow(1280, 720, "Click me!")
 	defer rl.CloseWindow()
 
 	rl.InitAudioDevice()
@@ -704,6 +732,7 @@ func main() {
 
 	rl.SetTargetFPS(60)
 	rl.SetExitKey(rl.KeyF5)
+	rg.SetStyle(0,rg.TEXT_SIZE, 25)
 
 	game := NewGame()
 	defer game.Destroy()
