@@ -369,12 +369,8 @@ func (game *Game) handleUI() {
 			rl.PlaySound(game.assets.selectButton)
 			game.currentState = Menu
 		}
-		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) + 100, Width: 150, Height: 50}, "#002# Quit") {
+		if rg.Button(rl.Rectangle{X: xButton, Y: float32(centreScreenHeight) + 100, Width: 200, Height: 50}, "#113# Quit") {
 			rl.PlaySound(game.assets.selectButton)
-			err := SaveScore(game.score, "score.txt")
-			if err != nil {
-				fmt.Println("Error saving score:", err)
-			}
 			game.shouldClose = true
 		}
 
